@@ -25,6 +25,7 @@ import pickle
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from huggingface_hub import hf_hub_download
 
 import numpy as np
 import requests
@@ -328,65 +329,44 @@ def fetch_poster(movie_id: int):
 # Model loading
 # ---------------------------------------------------------------------------
 
-@st.cache_resource(show_spinner="Loading recommendation models …")
+@st.cache_resource(show_spinner="Loading recommendation models...")
 def load_models():
-    """Load movies metadata, TF-IDF similarity matrix, and CF latent factors."""
-    movies_path    = BASE_DIR / "movies.pkl"
-    sim_path       = BASE_DIR / "similarity.pkl"
-    cf_path        = BASE_DIR / "cf_factors.pkl"
 
-    for p in (movies_path, sim_path):
-        if not p.exists():
-            raise FileNotFoundError(f"{p.name} not found!  Run main.py first.")
+    movies_path = BASE_DIR / "movies.pkl"
+    cf_path = BASE_DIR / "cf_factors.pkl"
+
+    sim_path = Path(
+        hf_hub_download(
+            repo_id="khansarim2255/cinematch-models",
+            filename="similarity.pkl",
+            repo_type="model"
+        )
+    )
+
+    if not movies_path.exists():
+        raise FileNotFoundError("movies.pkl not found!")
 
     with open(movies_path, "rb") as f:
         movies = pickle.load(f)
+
     with open(sim_path, "rb") as f:
         similarity = pickle.load(f)
 
     movies = movies.reset_index(drop=True)
+
     if len(movies) != similarity.shape[0]:
-        raise ValueError("movies.pkl and similarity.pkl are mismatched — re-run main.py.")
+        raise ValueError("movies.pkl and similarity.pkl are mismatched.")
 
     cf_data = None
+
     if cf_path.exists():
         with open(cf_path, "rb") as f:
             cf_data = pickle.load(f)
 
-    # Ensure genres_raw column exists (backwards-compat with old movies.pkl)
     if "genres_raw" not in movies.columns:
         movies["genres_raw"] = [[] for _ in range(len(movies))]
 
     return movies, similarity, cf_data
-
-
-try:
-    movies, similarity, cf_data = load_models()
-except Exception as exc:
-    st.error(f"⚠️  Model loading error: {exc}")
-    st.stop()
-
-has_cf = cf_data is not None
-
-# Determine which column holds the TMDB movie ID
-id_col = (
-    "movie_id" if "movie_id" in movies.columns
-    else "id" if "id" in movies.columns
-    else None
-)
-if id_col is None:
-    st.error("Movie ID column not found in movies.pkl!")
-    st.stop()
-
-# Collect all unique genres for the filter widget
-all_genres: list[str] = sorted(
-    {
-        genre
-        for genres in movies["genres_raw"]
-        for genre in (genres if isinstance(genres, list) else [])
-    }
-)
-
 
 # ---------------------------------------------------------------------------
 # Recommendation engine
